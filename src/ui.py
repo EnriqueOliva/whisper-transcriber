@@ -1,14 +1,17 @@
 import os
 import re
+import glob
 import time
 import threading
 import tkinter as tk
 from tkinter import filedialog
+from datetime import datetime
 import tkinterdnd2 as tkdnd
 from faster_whisper import WhisperModel
 
 from constants import (
     C, SUPPORTED_EXTENSIONS, VIDEO_EXTENSIONS, DEFAULT_OUTPUT_DIR, LANG_MAP,
+    LOG_DIR,
 )
 from engine import extract_audio, transcribe_audio, save_output
 
@@ -27,6 +30,9 @@ class TranscriberApp:
         self.is_transcribing = False
         self.cancel_requested = False
         self._progress_value = 0
+        self._session_log = []
+        self._log_flush_idx = 0
+        self._log_path = None
 
         self.language_var = tk.StringVar(value="Spanish")
         self.model_var = tk.StringVar(value="large-v3")
@@ -35,6 +41,13 @@ class TranscriberApp:
 
         self._build_ui()
         os.makedirs(DEFAULT_OUTPUT_DIR, exist_ok=True)
+        self.root.protocol("WM_DELETE_WINDOW", self._on_close)
+
+        self._init_log()
+        self.language_var.trace_add("write", lambda *_: self._slog(f"Setting changed: language = {self.language_var.get()}"))
+        self.model_var.trace_add("write", lambda *_: self._slog(f"Setting changed: model = {self.model_var.get()}"))
+        self.output_mode_var.trace_add("write", lambda *_: self._slog(f"Setting changed: output mode = {self.output_mode_var.get()}"))
+        self.output_var.trace_add("write", lambda *_: self._slog(f"Setting changed: output path = {self.output_var.get()}"))
 
     def _dropdown(self, parent, variable, values, width=16):
         outer = tk.Frame(parent, bg=C["entry_bg"], highlightbackground=C["border"],
@@ -290,9 +303,11 @@ class TranscriberApp:
             p = match.group(1) or match.group(2)
             if p:
                 paths.append(p)
+        self._slog(f"Files dropped: {len(paths)} item(s)")
         self._add_files(paths)
 
     def _browse_files(self):
+        self._slog("Opened file browser")
         exts = " ".join(f"*{e}" for e in sorted(SUPPORTED_EXTENSIONS))
         paths = filedialog.askopenfilenames(
             title="Select audio/video files",
@@ -300,11 +315,16 @@ class TranscriberApp:
         )
         if paths:
             self._add_files(paths)
+        else:
+            self._slog("File browser cancelled")
 
     def _browse_output(self):
+        self._slog("Opened output folder browser")
         d = filedialog.askdirectory(title="Select output folder")
         if d:
             self.output_var.set(d)
+        else:
+            self._slog("Output folder browser cancelled")
 
     def _add_files(self, paths):
         added = 0
@@ -313,19 +333,26 @@ class TranscriberApp:
             ext = os.path.splitext(p)[1].lower()
             if ext in SUPPORTED_EXTENSIONS and p not in self.files:
                 self.files.append(p)
+                self._slog(f"File added: {os.path.basename(p)}")
                 added += 1
         if added:
+            self._slog(f"Total files in queue: {len(self.files)}")
             self._refresh_file_list()
         elif paths:
+            self._slog(f"Rejected {len(paths)} unsupported file(s)")
             self._log("No supported files found in the dropped items.")
 
     def _remove_file(self, path):
         if path in self.files:
+            self._slog(f"File removed: {os.path.basename(path)}")
             self.files.remove(path)
+            self._slog(f"Total files in queue: {len(self.files)}")
             self._refresh_file_list()
 
     def _clear_files(self):
+        count = len(self.files)
         self.files.clear()
+        self._slog(f"Cleared all files ({count} removed)")
         self._refresh_file_list()
 
     def _refresh_file_list(self):
@@ -361,6 +388,7 @@ class TranscriberApp:
 
     def _toggle_transcription(self):
         if self.is_transcribing:
+            self._slog("Cancellation requested by user")
             self.cancel_requested = True
             self.transcribe_btn.configure(text="CANCELLING...", bg=C["text_dim"],
                                            activebackground=C["text_dim"], state="disabled")
@@ -370,6 +398,7 @@ class TranscriberApp:
             self._log("No files to transcribe. Add some files first.")
             return
 
+        self._slog(f"Transcription started: {len(self.files)} file(s), model={self.model_var.get()}, lang={self.language_var.get()}")
         self.is_transcribing = True
         self.cancel_requested = False
         self.transcribe_btn.configure(text="CANCEL", bg=C["red"], activebackground=C["red_hover"])
@@ -481,25 +510,69 @@ class TranscriberApp:
 
     def _open_output(self):
         output_dir = self.output_var.get()
+        self._slog(f"Opened output folder: {output_dir}")
         os.makedirs(output_dir, exist_ok=True)
         os.startfile(output_dir)
 
     def _update_status(self, text):
+        self._slog(f"[STATUS] {text}")
         self.root.after(0, lambda: self.progress_label.configure(text=text))
 
     def _set_progress(self, value):
         self._progress_value = value
-        def _update():
-            self._draw_progress()
-        self.root.after(0, _update)
+        self.root.after(0, self._draw_progress)
 
     def _log(self, text):
+        self._slog(text)
         def _append():
             self.log_text.configure(state="normal")
             self.log_text.insert("end", text + "\n")
             self.log_text.see("end")
             self.log_text.configure(state="disabled")
         self.root.after(0, _append)
+
+    def _slog(self, text):
+        self._session_log.append(f"[{datetime.now().strftime('%H:%M:%S')}] {text}")
+
+    def _init_log(self):
+        os.makedirs(LOG_DIR, exist_ok=True)
+        for old in glob.glob(os.path.join(LOG_DIR, "*.txt")):
+            os.remove(old)
+        stamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        self._log_path = os.path.join(LOG_DIR, f"{stamp}.txt")
+        header = (
+            f"Session started: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+            f"Model: {self.model_var.get()}  |  Language: {self.language_var.get()}  |  "
+            f"Output mode: {self.output_mode_var.get()}\n"
+            f"Output path: {self.output_var.get()}\n"
+            + "=" * 60 + "\n"
+        )
+        with open(self._log_path, "w", encoding="utf-8") as f:
+            f.write(header)
+        self._slog("Application started")
+        self._flush_log()
+
+    def _flush_log(self):
+        if self._log_path and self._log_flush_idx < len(self._session_log):
+            try:
+                with open(self._log_path, "a", encoding="utf-8") as f:
+                    for line in self._session_log[self._log_flush_idx:]:
+                        f.write(line + "\n")
+                self._log_flush_idx = len(self._session_log)
+            except Exception:
+                pass
+        self.root.after(2000, self._flush_log)
+
+    def _on_close(self):
+        self._slog("Application closed")
+        if self._log_path:
+            try:
+                with open(self._log_path, "a", encoding="utf-8") as f:
+                    for line in self._session_log[self._log_flush_idx:]:
+                        f.write(line + "\n")
+            except Exception:
+                pass
+        self.root.destroy()
 
     def run(self):
         self.root.mainloop()
