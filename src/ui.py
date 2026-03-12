@@ -3,7 +3,7 @@ import re
 import time
 import threading
 import tkinter as tk
-from tkinter import ttk, filedialog
+from tkinter import filedialog
 import tkinterdnd2 as tkdnd
 from faster_whisper import WhisperModel
 
@@ -17,82 +17,71 @@ class TranscriberApp:
     def __init__(self):
         self.root = tkdnd.Tk()
         self.root.title("Whisper Transcriber")
-        _dpi_scale = self.root.winfo_fpixels('1i') / 96.0
-        self.root.geometry(f"{int(820 * _dpi_scale)}x{int(780 * _dpi_scale)}")
-        self.root.minsize(int(700 * _dpi_scale), int(660 * _dpi_scale))
+        _s = self.root.winfo_fpixels('1i') / 96.0
+        self.root.geometry(f"{int(820 * _s)}x{int(780 * _s)}")
+        self.root.minsize(int(700 * _s), int(660 * _s))
         self.root.configure(bg=C["bg"])
 
         self.files = []
         self.model = None
         self.is_transcribing = False
         self.cancel_requested = False
+        self._progress_value = 0
+
+        self.language_var = tk.StringVar(value="Spanish")
+        self.model_var = tk.StringVar(value="large-v3")
         self.output_mode_var = tk.StringVar(value="Transcript (.txt)")
+        self.output_var = tk.StringVar(value=DEFAULT_OUTPUT_DIR)
 
-        self._setup_styles()
         self._build_ui()
-
         os.makedirs(DEFAULT_OUTPUT_DIR, exist_ok=True)
 
-    def _setup_styles(self):
-        style = ttk.Style()
-        style.theme_use("clam")
+    def _dropdown(self, parent, variable, values, width=16):
+        outer = tk.Frame(parent, bg=C["entry_bg"], highlightbackground=C["border"],
+                         highlightthickness=1, cursor="hand2")
 
-        style.configure("Main.TFrame", background=C["bg"])
-        style.configure("Card.TFrame", background=C["elevated"])
+        lbl = tk.Label(outer, textvariable=variable,
+                       font=("Segoe UI", 10), bg=C["entry_bg"], fg=C["entry_fg"],
+                       anchor="w", width=width, padx=8, pady=4, cursor="hand2")
+        lbl.pack(side="left", fill="both", expand=True)
 
-        style.configure("Title.TLabel", background=C["bg"], foreground=C["text"],
-                         font=("Segoe UI Semibold", 17))
-        style.configure("Subtitle.TLabel", background=C["bg"], foreground=C["text_dim"],
-                         font=("Segoe UI", 9))
-        style.configure("CardTitle.TLabel", background=C["elevated"], foreground=C["text"],
-                         font=("Segoe UI Semibold", 10))
-        style.configure("Card.TLabel", background=C["elevated"], foreground=C["text_sec"],
-                         font=("Segoe UI", 9))
+        arrow = tk.Label(outer, text="\u25be", font=("Segoe UI", 11),
+                         bg=C["entry_bg"], fg=C["text_sec"], padx=6, cursor="hand2")
+        arrow.pack(side="right")
 
-        style.configure("Small.TButton", font=("Segoe UI", 9), padding=(10, 4),
-                         background=C["surface"], foreground=C["text_sec"])
-        style.map("Small.TButton",
-                  background=[("active", C["border"])],
-                  foreground=[("active", C["text"])])
+        menu = tk.Menu(outer, tearoff=0, bg=C["surface"], fg=C["text_sec"],
+                       activebackground=C["accent"], activeforeground=C["text"],
+                       font=("Segoe UI", 10), borderwidth=1, relief="solid")
 
-        style.configure("Open.TButton", font=("Segoe UI", 9), padding=(12, 7),
-                         background=C["surface"], foreground=C["text_sec"])
-        style.map("Open.TButton",
-                  background=[("active", C["border"])],
-                  foreground=[("active", C["text"])])
+        for val in values:
+            menu.add_command(label=val, command=lambda v=val: variable.set(v))
 
-        style.configure("Custom.Horizontal.TProgressbar",
-                         troughcolor=C["surface"], background=C["accent"],
-                         bordercolor=C["surface"], lightcolor=C["accent"],
-                         darkcolor=C["accent_press"], thickness=6)
+        def show_menu(e=None):
+            menu.post(outer.winfo_rootx(), outer.winfo_rooty() + outer.winfo_height())
 
-        style.configure("TCombobox", fieldbackground=C["entry_bg"], background=C["surface"],
-                         foreground=C["entry_fg"], arrowcolor=C["text_sec"],
-                         selectbackground=C["accent"], selectforeground=C["text"])
-        style.map("TCombobox",
-                  fieldbackground=[("readonly", C["entry_bg"])],
-                  foreground=[("readonly", C["entry_fg"])])
+        for w in (outer, lbl, arrow):
+            w.bind("<Button-1>", show_menu)
 
-        style.configure("TEntry", fieldbackground=C["entry_bg"], foreground=C["entry_fg"],
-                         insertcolor=C["accent"])
+        outer.bind("<Enter>", lambda e: outer.configure(highlightbackground=C["accent"]))
+        outer.bind("<Leave>", lambda e: outer.configure(highlightbackground=C["border"]))
 
-        style.configure("TScrollbar", background=C["surface"], troughcolor=C["elevated"],
-                         arrowcolor=C["text_dim"], bordercolor=C["elevated"])
-        style.map("TScrollbar", background=[("active", C["border"])])
+        return outer
 
     def _build_ui(self):
-        main_frame = ttk.Frame(self.root, style="Main.TFrame")
-        main_frame.pack(fill="both", expand=True, padx=22, pady=(10, 16))
+        main = tk.Frame(self.root, bg=C["bg"])
+        main.pack(fill="both", expand=True, padx=24, pady=(12, 18))
 
-        ttk.Label(main_frame, text="Whisper Transcriber", style="Title.TLabel").pack(anchor="w")
-        ttk.Label(main_frame, text="Drag & drop audio/video files to transcribe them locally using AI",
-                  style="Subtitle.TLabel").pack(anchor="w", pady=(2, 14))
+        tk.Label(main, text="Whisper Transcriber", bg=C["bg"], fg=C["text"],
+                 font=("Segoe UI Semibold", 18), anchor="w").pack(fill="x")
+        tk.Label(main, text="Drag & drop audio/video files to transcribe them locally using AI",
+                 bg=C["bg"], fg=C["text_dim"], font=("Segoe UI", 9), anchor="w"
+                 ).pack(fill="x", pady=(2, 14))
 
-        self._build_drop_zone(main_frame)
-        self._build_file_list(main_frame)
-        self._build_settings(main_frame)
-        self._build_action_bar(main_frame)
-        self._build_progress_area(main_frame)
+        self._build_drop_zone(main)
+        self._build_file_list(main)
+        self._build_settings(main)
+        self._build_action_bar(main)
+        self._build_progress(main)
 
     def _build_drop_zone(self, parent):
         self.drop_frame = tk.Frame(parent, bg=C["surface"], highlightbackground=C["border"],
@@ -121,23 +110,30 @@ class TranscriberApp:
         ))
 
     def _build_file_list(self, parent):
-        list_frame = ttk.Frame(parent, style="Card.TFrame")
+        list_frame = tk.Frame(parent, bg=C["elevated"])
         list_frame.pack(fill="both", expand=True, pady=(0, 10))
 
-        header = ttk.Frame(list_frame, style="Card.TFrame")
+        header = tk.Frame(list_frame, bg=C["elevated"])
         header.pack(fill="x", padx=12, pady=(8, 0))
-        self.file_count_label = ttk.Label(header, text="Files (0)", style="CardTitle.TLabel")
+        self.file_count_label = tk.Label(header, text="Files (0)", bg=C["elevated"],
+                                          fg=C["text"], font=("Segoe UI Semibold", 10))
         self.file_count_label.pack(side="left")
 
-        clear_btn = ttk.Button(header, text="Clear all", style="Small.TButton",
-                               command=self._clear_files)
+        clear_btn = tk.Button(header, text="Clear all", font=("Segoe UI", 9),
+                              bg=C["surface"], fg=C["text_sec"],
+                              activebackground=C["border"], activeforeground=C["text"],
+                              borderwidth=0, relief="flat", cursor="hand2",
+                              padx=12, pady=5, command=self._clear_files)
         clear_btn.pack(side="right")
 
-        canvas_frame = ttk.Frame(list_frame, style="Card.TFrame")
+        canvas_frame = tk.Frame(list_frame, bg=C["elevated"])
         canvas_frame.pack(fill="both", expand=True, padx=12, pady=(4, 10))
 
         self.file_canvas = tk.Canvas(canvas_frame, bg=C["elevated"], highlightthickness=0, height=120)
-        scrollbar = ttk.Scrollbar(canvas_frame, orient="vertical", command=self.file_canvas.yview)
+        scrollbar = tk.Scrollbar(canvas_frame, orient="vertical", command=self.file_canvas.yview,
+                                 bg=C["surface"], troughcolor=C["elevated"],
+                                 activebackground=C["border"], width=14,
+                                 highlightthickness=0, bd=0)
         self.file_inner = tk.Frame(self.file_canvas, bg=C["elevated"])
 
         self.file_inner.bind("<Configure>",
@@ -159,55 +155,62 @@ class TranscriberApp:
         self.file_canvas.itemconfigure(self._file_window_id, width=event.width)
 
     def _build_settings(self, parent):
-        settings_frame = ttk.Frame(parent, style="Card.TFrame")
-        settings_frame.pack(fill="x", pady=(0, 10))
+        settings = tk.Frame(parent, bg=C["elevated"])
+        settings.pack(fill="x", pady=(0, 10))
 
-        inner = ttk.Frame(settings_frame, style="Card.TFrame")
+        inner = tk.Frame(settings, bg=C["elevated"])
         inner.pack(fill="x", padx=12, pady=10)
 
-        row1 = ttk.Frame(inner, style="Card.TFrame")
+        row1 = tk.Frame(inner, bg=C["elevated"])
         row1.pack(fill="x", pady=(0, 6))
 
-        ttk.Label(row1, text="Language", style="Card.TLabel").pack(side="left")
-        self.language_var = tk.StringVar(value="Spanish")
-        lang_combo = ttk.Combobox(row1, textvariable=self.language_var, width=14, state="readonly",
-                                   values=["Auto-detect", "Spanish", "English", "Portuguese", "French",
-                                            "German", "Italian", "Japanese", "Chinese", "Korean"])
-        lang_combo.pack(side="left", padx=(8, 24))
+        tk.Label(row1, text="Language", bg=C["elevated"], fg=C["text_sec"],
+                 font=("Segoe UI", 10)).pack(side="left")
+        self._dropdown(row1, self.language_var,
+                       ["Auto-detect", "Spanish", "English", "Portuguese", "French",
+                        "German", "Italian", "Japanese", "Chinese", "Korean"],
+                       width=14).pack(side="left", padx=(8, 24))
 
-        ttk.Label(row1, text="Model", style="Card.TLabel").pack(side="left")
-        self.model_var = tk.StringVar(value="large-v3")
-        model_combo = ttk.Combobox(row1, textvariable=self.model_var, width=14, state="readonly",
-                                    values=["large-v3", "medium", "small", "base", "tiny"])
-        model_combo.pack(side="left", padx=(8, 0))
+        tk.Label(row1, text="Model", bg=C["elevated"], fg=C["text_sec"],
+                 font=("Segoe UI", 10)).pack(side="left")
+        self._dropdown(row1, self.model_var,
+                       ["large-v3", "medium", "small", "base", "tiny"],
+                       width=14).pack(side="left", padx=(8, 0))
 
-        row2 = ttk.Frame(inner, style="Card.TFrame")
+        row2 = tk.Frame(inner, bg=C["elevated"])
         row2.pack(fill="x", pady=(0, 6))
 
-        ttk.Label(row2, text="Output format", style="Card.TLabel").pack(side="left")
-        mode_combo = ttk.Combobox(row2, textvariable=self.output_mode_var, width=28, state="readonly",
-                                   values=["Transcript (.txt)", "Rename source by transcript"])
-        mode_combo.pack(side="left", padx=(8, 0))
+        tk.Label(row2, text="Output format", bg=C["elevated"], fg=C["text_sec"],
+                 font=("Segoe UI", 10)).pack(side="left")
+        self._dropdown(row2, self.output_mode_var,
+                       ["Transcript (.txt)", "Rename source by transcript"],
+                       width=28).pack(side="left", padx=(8, 0))
 
-        row3 = ttk.Frame(inner, style="Card.TFrame")
+        row3 = tk.Frame(inner, bg=C["elevated"])
         row3.pack(fill="x")
 
-        ttk.Label(row3, text="Output path", style="Card.TLabel").pack(side="left")
-        self.output_var = tk.StringVar(value=DEFAULT_OUTPUT_DIR)
-        output_entry = ttk.Entry(row3, textvariable=self.output_var, width=50)
-        output_entry.pack(side="left", padx=(8, 6), fill="x", expand=True)
-        ttk.Button(row3, text="Browse", style="Small.TButton",
-                   command=self._browse_output).pack(side="left")
+        tk.Label(row3, text="Output path", bg=C["elevated"], fg=C["text_sec"],
+                 font=("Segoe UI", 10)).pack(side="left")
+        output_entry = tk.Entry(row3, textvariable=self.output_var, font=("Segoe UI", 10),
+                                bg=C["entry_bg"], fg=C["entry_fg"], insertbackground=C["accent"],
+                                relief="flat", highlightbackground=C["border"], highlightthickness=1)
+        output_entry.pack(side="left", padx=(8, 6), fill="x", expand=True, ipady=4)
+        browse_btn = tk.Button(row3, text="Browse", font=("Segoe UI", 9),
+                               bg=C["surface"], fg=C["text_sec"],
+                               activebackground=C["border"], activeforeground=C["text"],
+                               borderwidth=0, relief="flat", cursor="hand2",
+                               padx=12, pady=5, command=self._browse_output)
+        browse_btn.pack(side="left")
 
     def _build_action_bar(self, parent):
-        action_frame = ttk.Frame(parent, style="Main.TFrame")
-        action_frame.pack(fill="x", pady=(0, 10))
+        action = tk.Frame(parent, bg=C["bg"])
+        action.pack(fill="x", pady=(0, 10))
 
         self.transcribe_btn = tk.Button(
-            action_frame, text="TRANSCRIBE", font=("Segoe UI Semibold", 10),
+            action, text="TRANSCRIBE", font=("Segoe UI Semibold", 11),
             bg=C["accent"], fg="#13131a", activebackground=C["accent_hover"],
             activeforeground="#13131a", borderwidth=0, cursor="hand2",
-            padx=28, pady=9, relief="flat"
+            padx=30, pady=10, relief="flat"
         )
         self.transcribe_btn.configure(command=self._toggle_transcription)
         self.transcribe_btn.pack(side="left")
@@ -229,23 +232,27 @@ class TranscriberApp:
         self.transcribe_btn.bind("<Enter>", _btn_enter)
         self.transcribe_btn.bind("<Leave>", _btn_leave)
 
-        self.open_btn = ttk.Button(action_frame, text="Open output folder", style="Open.TButton",
-                                    command=self._open_output)
-        self.open_btn.pack(side="right")
+        open_btn = tk.Button(action, text="Open output folder", font=("Segoe UI", 9),
+                             bg=C["surface"], fg=C["text_sec"],
+                             activebackground=C["border"], activeforeground=C["text"],
+                             borderwidth=0, relief="flat", cursor="hand2",
+                             padx=14, pady=8, command=self._open_output)
+        open_btn.pack(side="right")
 
-    def _build_progress_area(self, parent):
-        progress_frame = ttk.Frame(parent, style="Card.TFrame")
-        progress_frame.pack(fill="both", expand=True)
+    def _build_progress(self, parent):
+        prog_frame = tk.Frame(parent, bg=C["elevated"])
+        prog_frame.pack(fill="both", expand=True)
 
-        inner = ttk.Frame(progress_frame, style="Card.TFrame")
+        inner = tk.Frame(prog_frame, bg=C["elevated"])
         inner.pack(fill="both", expand=True, padx=12, pady=10)
 
-        self.progress_label = ttk.Label(inner, text="Ready", style="Card.TLabel")
-        self.progress_label.pack(anchor="w")
+        self.progress_label = tk.Label(inner, text="Ready", bg=C["elevated"],
+                                        fg=C["text_sec"], font=("Segoe UI", 9), anchor="w")
+        self.progress_label.pack(fill="x")
 
-        self.progress_bar = ttk.Progressbar(inner, style="Custom.Horizontal.TProgressbar",
-                                             mode="determinate", length=400)
-        self.progress_bar.pack(fill="x", pady=(6, 8))
+        self.progress_canvas = tk.Canvas(inner, bg=C["surface"], highlightthickness=0, height=6)
+        self.progress_canvas.pack(fill="x", pady=(6, 8))
+        self.progress_canvas.bind("<Configure>", lambda e: self._draw_progress())
 
         log_frame = tk.Frame(inner, bg=C["log_bg"], highlightbackground=C["border"],
                              highlightthickness=1)
@@ -256,10 +263,25 @@ class TranscriberApp:
                                 state="disabled", borderwidth=4, relief="flat",
                                 highlightthickness=0, insertbackground=C["accent"],
                                 selectbackground=C["accent"], selectforeground=C["text"])
-        log_scroll = ttk.Scrollbar(log_frame, orient="vertical", command=self.log_text.yview)
+        log_scroll = tk.Scrollbar(log_frame, orient="vertical", command=self.log_text.yview,
+                                  bg=C["surface"], troughcolor=C["log_bg"],
+                                  activebackground=C["border"], width=14,
+                                  highlightthickness=0, bd=0)
         self.log_text.configure(yscrollcommand=log_scroll.set)
         self.log_text.pack(side="left", fill="both", expand=True)
         log_scroll.pack(side="right", fill="y")
+
+    def _draw_progress(self):
+        c = self.progress_canvas
+        c.delete("all")
+        w = c.winfo_width()
+        h = c.winfo_height()
+        if w < 4:
+            return
+        c.create_rectangle(0, 0, w, h, fill=C["surface"], outline="")
+        if self._progress_value > 0:
+            fill_w = max(2, int(w * self._progress_value / 100))
+            c.create_rectangle(0, 0, fill_w, h, fill=C["accent"], outline="")
 
     def _on_drop(self, event):
         raw = event.data
@@ -323,18 +345,19 @@ class TranscriberApp:
             color = C["amber"] if is_video else C["green"]
 
             tag_frame = tk.Frame(row, bg=color, padx=1, pady=0)
-            tag_frame.pack(side="left", padx=(6, 6), pady=2)
+            tag_frame.pack(side="left", padx=(8, 8), pady=3)
             tk.Label(tag_frame, text=tag, bg=color, fg=C["bg"],
-                     font=("Consolas", 7, "bold")).pack(padx=3)
+                     font=("Consolas", 8, "bold")).pack(padx=4)
 
             tk.Label(row, text=name, bg=C["elevated"], fg=C["text"],
-                     font=("Segoe UI", 9), anchor="w").pack(side="left", fill="x", expand=True)
+                     font=("Segoe UI", 10), anchor="w").pack(side="left", fill="x", expand=True)
 
             remove_btn = tk.Button(row, text="\u00d7", bg=C["elevated"], fg=C["text_dim"],
-                                   font=("Segoe UI", 10), borderwidth=0, cursor="hand2",
+                                   font=("Segoe UI", 14), borderwidth=0, cursor="hand2",
                                    activebackground=C["elevated"], activeforeground=C["red"],
+                                   padx=6, pady=2,
                                    command=lambda p=path: self._remove_file(p))
-            remove_btn.pack(side="right", padx=(0, 8))
+            remove_btn.pack(side="right", padx=(0, 10))
 
     def _toggle_transcription(self):
         if self.is_transcribing:
@@ -465,7 +488,10 @@ class TranscriberApp:
         self.root.after(0, lambda: self.progress_label.configure(text=text))
 
     def _set_progress(self, value):
-        self.root.after(0, lambda: self.progress_bar.configure(value=value))
+        self._progress_value = value
+        def _update():
+            self._draw_progress()
+        self.root.after(0, _update)
 
     def _log(self, text):
         def _append():
