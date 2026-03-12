@@ -1,0 +1,42 @@
+import os
+import re
+
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+VENV_DIR = os.path.join(PROJECT_ROOT, ".venv")
+DEFAULT_OUTPUT_DIR = os.path.join(PROJECT_ROOT, "output")
+
+SUPPORTED_EXTENSIONS = {
+    ".mp3", ".wav", ".m4a", ".ogg", ".flac", ".wma", ".aac",
+    ".mp4", ".mkv", ".avi", ".mov", ".webm", ".wmv", ".ts", ".flv",
+}
+VIDEO_EXTENSIONS = {".mp4", ".mkv", ".avi", ".mov", ".webm", ".wmv", ".ts", ".flv"}
+
+MAX_FILENAME_LEN = 120
+INVALID_FILENAME_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+
+LANG_MAP = {
+    "Spanish": "es", "English": "en", "Portuguese": "pt", "French": "fr",
+    "German": "de", "Italian": "it", "Japanese": "ja", "Chinese": "zh", "Korean": "ko",
+}
+
+C = {
+    "bg":           "#13131a",
+    "elevated":     "#1b1b26",
+    "surface":      "#232330",
+    "border":       "#2c2c3a",
+    "border_hover": "#d4943a",
+    "text":         "#e8e2da",
+    "text_sec":     "#9490a0",
+    "text_dim":     "#5c586a",
+    "accent":       "#d4943a",
+    "accent_hover": "#e8b050",
+    "accent_press": "#b07828",
+    "green":        "#7ec4a0",
+    "amber":        "#c4a06c",
+    "red":          "#c07070",
+    "red_hover":    "#e08080",
+    "log_bg":       "#111118",
+    "log_fg":       "#8a8694",
+    "entry_bg":     "#18181f",
+    "entry_fg":     "#d0ccc4",
+}
