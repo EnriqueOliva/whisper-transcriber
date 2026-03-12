@@ -18,9 +18,18 @@ for _d in _nvidia_dirs:
     if os.path.isdir(_d) and _d not in os.environ.get("PATH", ""):
         os.environ["PATH"] = _d + os.pathsep + os.environ.get("PATH", "")
 
-from ui import TranscriberApp
-
+_config_path = os.path.join(PROJECT_ROOT, "config.txt")
+UI_VARIANT = None
+if os.path.isfile(_config_path):
+    _raw = open(_config_path, encoding="utf-8").read().strip()
+    if _raw and _raw != "default":
+        UI_VARIANT = _raw
 
 if __name__ == "__main__":
-    app = TranscriberApp()
+    if UI_VARIANT:
+        import importlib
+        mod = importlib.import_module(f"uis.ui_{UI_VARIANT}")
+    else:
+        import ui as mod
+    app = mod.TranscriberApp()
     app.run()
