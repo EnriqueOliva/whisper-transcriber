@@ -1,5 +1,8 @@
 import os
 import sys
+import ctypes
+
+ctypes.windll.shcore.SetProcessDpiAwareness(1)
 
 os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
 
