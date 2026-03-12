@@ -24,6 +24,20 @@ Built on [faster-whisper](https://github.com/SYSTRAN/faster-whisper) (a high-per
 - NVIDIA GPU with updated drivers (any modern GeForce/RTX)
 - ~4 GB disk space (dependencies + model cache)
 
+## Dependencies
+
+Managed automatically by the setup script:
+
+| Dependency                                                  | Purpose                          | Installed via       |
+| ----------------------------------------------------------- | -------------------------------- | ------------------- |
+| [uv](https://docs.astral.sh/uv/)                            | Python version & package manager | astral.sh installer |
+| [FFmpeg](https://ffmpeg.org/)                               | Audio/video decoding             | winget or choco     |
+| Python 3.11                                                 | Runtime                          | uv                  |
+| [faster-whisper](https://github.com/SYSTRAN/faster-whisper) | Whisper inference engine         | pip (in venv)       |
+| [tkinterdnd2](https://github.com/pmgagne/tkinterdnd2)       | Drag & drop for tkinter          | pip (in venv)       |
+| nvidia-cublas-cu12                                          | CUDA linear algebra              | pip (in venv)       |
+| nvidia-cudnn-cu12                                           | CUDA deep neural networks        | pip (in venv)       |
+
 ## Quick Start
 
 ### First-time setup
@@ -62,38 +76,18 @@ whisper-transcriber/
 
 All settings are available in the app UI:
 
-| Setting | Options | Default |
-|---------|---------|---------|
-| Language | Auto-detect, Spanish, English, +7 more | Spanish |
-| Model | large-v3, medium, small, base, tiny | large-v3 |
+| Setting       | Options                                        | Default           |
+| ------------- | ---------------------------------------------- | ----------------- |
+| Language      | Auto-detect, Spanish, English, +7 more         | Spanish           |
+| Model         | large-v3, medium, small, base, tiny            | large-v3          |
 | Output format | Transcript (.txt), Rename source by transcript | Transcript (.txt) |
-| Output folder | Any local path | `./output/` |
-
-## Dependencies
-
-Managed automatically by the setup script:
-
-| Dependency | Purpose | Installed via |
-|------------|---------|---------------|
-| [uv](https://docs.astral.sh/uv/) | Python version & package manager | astral.sh installer |
-| [FFmpeg](https://ffmpeg.org/) | Audio/video decoding | winget or choco |
-| Python 3.11 | Runtime | uv |
-| [faster-whisper](https://github.com/SYSTRAN/faster-whisper) | Whisper inference engine | pip (in venv) |
-| [tkinterdnd2](https://github.com/pmgagne/tkinterdnd2) | Drag & drop for tkinter | pip (in venv) |
-| nvidia-cublas-cu12 | CUDA linear algebra | pip (in venv) |
-| nvidia-cudnn-cu12 | CUDA deep neural networks | pip (in venv) |
+| Output folder | Any local path                                 | `./output/`       |
 
 ## Model Information
 
 Models are downloaded automatically on first use and cached at `~/.cache/huggingface/`.
 
 Available models, from lightest to heaviest: `tiny`, `base`, `small`, `medium`, `large-v3`. Smaller models are faster and use less VRAM; larger models produce more accurate transcriptions.
-
-## Setup on Another PC
-
-1. Clone the repo (or download as ZIP and extract)
-2. Run `setup/setup.vbs` — it installs everything automatically
-3. Double-click `launch.vbs` to start the app
 
 ## License
 
