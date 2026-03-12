@@ -1,14 +1,17 @@
 import os
 import re
+import glob
 import time
 import threading
 import tkinter as tk
-from tkinter import ttk, filedialog
+from tkinter import filedialog
+from datetime import datetime
 import tkinterdnd2 as tkdnd
 from faster_whisper import WhisperModel
 
 from constants import (
     C, SUPPORTED_EXTENSIONS, VIDEO_EXTENSIONS, DEFAULT_OUTPUT_DIR, LANG_MAP,
+    LOG_DIR,
 )
 from engine import extract_audio, transcribe_audio, save_output
 
@@ -17,106 +20,81 @@ class TranscriberApp:
     def __init__(self):
         self.root = tkdnd.Tk()
         self.root.title("Whisper Transcriber")
-        self.root.geometry("740x720")
-        self.root.minsize(640, 620)
+        _s = self.root.winfo_fpixels('1i') / 96.0
+        self.root.geometry(f"{int(820 * _s)}x{int(780 * _s)}")
+        self.root.minsize(int(700 * _s), int(660 * _s))
         self.root.configure(bg=C["bg"])
 
         self.files = []
         self.model = None
         self.is_transcribing = False
         self.cancel_requested = False
-        self.copy_renamed_var = tk.BooleanVar(value=False)
+        self._progress_value = 0
+        self._session_log = []
+        self._log_flush_idx = 0
+        self._log_path = None
 
-        self._setup_styles()
-        self._build_menu_bar()
+        self.language_var = tk.StringVar(value="Spanish")
+        self.model_var = tk.StringVar(value="large-v3")
+        self.output_mode_var = tk.StringVar(value="Transcript (.txt)")
+        self.output_var = tk.StringVar(value=DEFAULT_OUTPUT_DIR)
+
         self._build_ui()
-
         os.makedirs(DEFAULT_OUTPUT_DIR, exist_ok=True)
+        self.root.protocol("WM_DELETE_WINDOW", self._on_close)
 
-    def _setup_styles(self):
-        style = ttk.Style()
-        style.theme_use("clam")
+        self._init_log()
+        self.language_var.trace_add("write", lambda *_: self._slog(f"Setting changed: language = {self.language_var.get()}"))
+        self.model_var.trace_add("write", lambda *_: self._slog(f"Setting changed: model = {self.model_var.get()}"))
+        self.output_mode_var.trace_add("write", lambda *_: self._slog(f"Setting changed: output mode = {self.output_mode_var.get()}"))
+        self.output_var.trace_add("write", lambda *_: self._slog(f"Setting changed: output path = {self.output_var.get()}"))
 
-        style.configure("Main.TFrame", background=C["bg"])
-        style.configure("Card.TFrame", background=C["elevated"])
+    def _dropdown(self, parent, variable, values, width=16):
+        outer = tk.Frame(parent, bg=C["entry_bg"], highlightbackground=C["border"],
+                         highlightthickness=1, cursor="hand2")
 
-        style.configure("Title.TLabel", background=C["bg"], foreground=C["text"],
-                         font=("Segoe UI Semibold", 17))
-        style.configure("Subtitle.TLabel", background=C["bg"], foreground=C["text_dim"],
-                         font=("Segoe UI", 9))
-        style.configure("CardTitle.TLabel", background=C["elevated"], foreground=C["text"],
-                         font=("Segoe UI Semibold", 10))
-        style.configure("Card.TLabel", background=C["elevated"], foreground=C["text_sec"],
-                         font=("Segoe UI", 9))
+        lbl = tk.Label(outer, textvariable=variable,
+                       font=("Segoe UI", 10), bg=C["entry_bg"], fg=C["entry_fg"],
+                       anchor="w", width=width, padx=8, pady=4, cursor="hand2")
+        lbl.pack(side="left", fill="both", expand=True)
 
-        style.configure("Small.TButton", font=("Segoe UI", 9), padding=(10, 4),
-                         background=C["surface"], foreground=C["text_sec"])
-        style.map("Small.TButton",
-                  background=[("active", C["border"])],
-                  foreground=[("active", C["text"])])
+        arrow = tk.Label(outer, text="\u25be", font=("Segoe UI", 11),
+                         bg=C["entry_bg"], fg=C["text_sec"], padx=6, cursor="hand2")
+        arrow.pack(side="right")
 
-        style.configure("Open.TButton", font=("Segoe UI", 9), padding=(12, 7),
-                         background=C["surface"], foreground=C["text_sec"])
-        style.map("Open.TButton",
-                  background=[("active", C["border"])],
-                  foreground=[("active", C["text"])])
+        menu = tk.Menu(outer, tearoff=0, bg=C["surface"], fg=C["text_sec"],
+                       activebackground=C["accent"], activeforeground=C["text"],
+                       font=("Segoe UI", 10), borderwidth=1, relief="solid")
 
-        style.configure("Custom.Horizontal.TProgressbar",
-                         troughcolor=C["surface"], background=C["accent"],
-                         bordercolor=C["surface"], lightcolor=C["accent"],
-                         darkcolor=C["accent_press"], thickness=6)
+        for val in values:
+            menu.add_command(label=val, command=lambda v=val: variable.set(v))
 
-        style.configure("TCombobox", fieldbackground=C["entry_bg"], background=C["surface"],
-                         foreground=C["entry_fg"], arrowcolor=C["text_sec"],
-                         selectbackground=C["accent"], selectforeground=C["text"])
-        style.map("TCombobox",
-                  fieldbackground=[("readonly", C["entry_bg"])],
-                  foreground=[("readonly", C["entry_fg"])])
+        def show_menu(e=None):
+            menu.post(outer.winfo_rootx(), outer.winfo_rooty() + outer.winfo_height())
 
-        style.configure("TEntry", fieldbackground=C["entry_bg"], foreground=C["entry_fg"],
-                         insertcolor=C["accent"])
+        for w in (outer, lbl, arrow):
+            w.bind("<Button-1>", show_menu)
 
-        style.configure("TScrollbar", background=C["surface"], troughcolor=C["elevated"],
-                         arrowcolor=C["text_dim"], bordercolor=C["elevated"])
-        style.map("TScrollbar", background=[("active", C["border"])])
+        outer.bind("<Enter>", lambda e: outer.configure(highlightbackground=C["accent"]))
+        outer.bind("<Leave>", lambda e: outer.configure(highlightbackground=C["border"]))
 
-    def _build_menu_bar(self):
-        menubar = tk.Menu(self.root, bg=C["elevated"], fg=C["text_sec"],
-                          activebackground=C["accent"], activeforeground=C["text"],
-                          font=("Segoe UI", 9), borderwidth=0, relief="flat")
-
-        settings_menu = tk.Menu(menubar, tearoff=0, bg=C["elevated"], fg=C["text_sec"],
-                                activebackground=C["accent"], activeforeground=C["text"],
-                                font=("Segoe UI", 9), borderwidth=1, relief="solid")
-
-        features_menu = tk.Menu(settings_menu, tearoff=0, bg=C["elevated"], fg=C["text_sec"],
-                                activebackground=C["accent"], activeforeground=C["text"],
-                                font=("Segoe UI", 9), borderwidth=1, relief="solid")
-
-        features_menu.add_checkbutton(
-            label="Copy source file renamed by transcript content",
-            variable=self.copy_renamed_var,
-            onvalue=True, offvalue=False
-        )
-
-        settings_menu.add_cascade(label="Special features", menu=features_menu)
-        menubar.add_cascade(label="Settings", menu=settings_menu)
-
-        self.root.config(menu=menubar)
+        return outer
 
     def _build_ui(self):
-        main_frame = ttk.Frame(self.root, style="Main.TFrame")
-        main_frame.pack(fill="both", expand=True, padx=22, pady=(10, 16))
+        main = tk.Frame(self.root, bg=C["bg"])
+        main.pack(fill="both", expand=True, padx=24, pady=(12, 18))
 
-        ttk.Label(main_frame, text="Whisper Transcriber", style="Title.TLabel").pack(anchor="w")
-        ttk.Label(main_frame, text="Drag & drop audio/video files to transcribe them locally using AI",
-                  style="Subtitle.TLabel").pack(anchor="w", pady=(2, 14))
+        tk.Label(main, text="Whisper Transcriber", bg=C["bg"], fg=C["text"],
+                 font=("Segoe UI Semibold", 18), anchor="w").pack(fill="x")
+        tk.Label(main, text="Drag & drop audio/video files to transcribe them locally using AI",
+                 bg=C["bg"], fg=C["text_dim"], font=("Segoe UI", 9), anchor="w"
+                 ).pack(fill="x", pady=(2, 14))
 
-        self._build_drop_zone(main_frame)
-        self._build_file_list(main_frame)
-        self._build_settings(main_frame)
-        self._build_action_bar(main_frame)
-        self._build_progress_area(main_frame)
+        self._build_drop_zone(main)
+        self._build_file_list(main)
+        self._build_settings(main)
+        self._build_action_bar(main)
+        self._build_progress(main)
 
     def _build_drop_zone(self, parent):
         self.drop_frame = tk.Frame(parent, bg=C["surface"], highlightbackground=C["border"],
@@ -145,107 +123,149 @@ class TranscriberApp:
         ))
 
     def _build_file_list(self, parent):
-        list_frame = ttk.Frame(parent, style="Card.TFrame")
+        list_frame = tk.Frame(parent, bg=C["elevated"])
         list_frame.pack(fill="both", expand=True, pady=(0, 10))
 
-        header = ttk.Frame(list_frame, style="Card.TFrame")
+        header = tk.Frame(list_frame, bg=C["elevated"])
         header.pack(fill="x", padx=12, pady=(8, 0))
-        self.file_count_label = ttk.Label(header, text="Files (0)", style="CardTitle.TLabel")
+        self.file_count_label = tk.Label(header, text="Files (0)", bg=C["elevated"],
+                                          fg=C["text"], font=("Segoe UI Semibold", 10))
         self.file_count_label.pack(side="left")
 
-        clear_btn = ttk.Button(header, text="Clear all", style="Small.TButton",
-                               command=self._clear_files)
+        clear_btn = tk.Button(header, text="Clear all", font=("Segoe UI", 9),
+                              bg=C["surface"], fg=C["text_sec"],
+                              activebackground=C["border"], activeforeground=C["text"],
+                              borderwidth=0, relief="flat", cursor="hand2",
+                              padx=12, pady=5, command=self._clear_files)
         clear_btn.pack(side="right")
 
-        canvas_frame = ttk.Frame(list_frame, style="Card.TFrame")
+        canvas_frame = tk.Frame(list_frame, bg=C["elevated"])
         canvas_frame.pack(fill="both", expand=True, padx=12, pady=(4, 10))
 
         self.file_canvas = tk.Canvas(canvas_frame, bg=C["elevated"], highlightthickness=0, height=120)
-        scrollbar = ttk.Scrollbar(canvas_frame, orient="vertical", command=self.file_canvas.yview)
+        scrollbar = tk.Scrollbar(canvas_frame, orient="vertical", command=self.file_canvas.yview,
+                                 bg=C["surface"], troughcolor=C["elevated"],
+                                 activebackground=C["border"], width=14,
+                                 highlightthickness=0, bd=0)
         self.file_inner = tk.Frame(self.file_canvas, bg=C["elevated"])
 
         self.file_inner.bind("<Configure>",
                              lambda e: self.file_canvas.configure(scrollregion=self.file_canvas.bbox("all")))
-        self.file_canvas.create_window((0, 0), window=self.file_inner, anchor="nw")
+        self._file_window_id = self.file_canvas.create_window((0, 0), window=self.file_inner, anchor="nw")
         self.file_canvas.configure(yscrollcommand=scrollbar.set)
 
         self.file_canvas.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
 
+        self.file_canvas.bind("<Configure>", self._on_file_canvas_configure)
         self.file_canvas.bind("<Enter>", lambda e: self.file_canvas.bind_all("<MouseWheel>", self._on_mousewheel))
         self.file_canvas.bind("<Leave>", lambda e: self.file_canvas.unbind_all("<MouseWheel>"))
 
     def _on_mousewheel(self, event):
         self.file_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
 
-    def _build_settings(self, parent):
-        settings_frame = ttk.Frame(parent, style="Card.TFrame")
-        settings_frame.pack(fill="x", pady=(0, 10))
+    def _on_file_canvas_configure(self, event):
+        self.file_canvas.itemconfigure(self._file_window_id, width=event.width)
 
-        inner = ttk.Frame(settings_frame, style="Card.TFrame")
+    def _build_settings(self, parent):
+        settings = tk.Frame(parent, bg=C["elevated"])
+        settings.pack(fill="x", pady=(0, 10))
+
+        inner = tk.Frame(settings, bg=C["elevated"])
         inner.pack(fill="x", padx=12, pady=10)
 
-        row1 = ttk.Frame(inner, style="Card.TFrame")
+        row1 = tk.Frame(inner, bg=C["elevated"])
         row1.pack(fill="x", pady=(0, 6))
 
-        ttk.Label(row1, text="Language", style="Card.TLabel").pack(side="left")
-        self.language_var = tk.StringVar(value="Spanish")
-        lang_combo = ttk.Combobox(row1, textvariable=self.language_var, width=14, state="readonly",
-                                   values=["Auto-detect", "Spanish", "English", "Portuguese", "French",
-                                            "German", "Italian", "Japanese", "Chinese", "Korean"])
-        lang_combo.pack(side="left", padx=(8, 24))
+        tk.Label(row1, text="Language", bg=C["elevated"], fg=C["text_sec"],
+                 font=("Segoe UI", 10)).pack(side="left")
+        self._dropdown(row1, self.language_var,
+                       ["Auto-detect", "Spanish", "English", "Portuguese", "French",
+                        "German", "Italian", "Japanese", "Chinese", "Korean"],
+                       width=14).pack(side="left", padx=(8, 24))
 
-        ttk.Label(row1, text="Model", style="Card.TLabel").pack(side="left")
-        self.model_var = tk.StringVar(value="large-v3")
-        model_combo = ttk.Combobox(row1, textvariable=self.model_var, width=14, state="readonly",
-                                    values=["large-v3", "medium", "small", "base", "tiny"])
-        model_combo.pack(side="left", padx=(8, 0))
+        tk.Label(row1, text="Model", bg=C["elevated"], fg=C["text_sec"],
+                 font=("Segoe UI", 10)).pack(side="left")
+        self._dropdown(row1, self.model_var,
+                       ["large-v3", "medium", "small", "base", "tiny"],
+                       width=14).pack(side="left", padx=(8, 0))
 
-        row2 = ttk.Frame(inner, style="Card.TFrame")
-        row2.pack(fill="x")
+        row2 = tk.Frame(inner, bg=C["elevated"])
+        row2.pack(fill="x", pady=(0, 6))
 
-        ttk.Label(row2, text="Output", style="Card.TLabel").pack(side="left")
-        self.output_var = tk.StringVar(value=DEFAULT_OUTPUT_DIR)
-        output_entry = ttk.Entry(row2, textvariable=self.output_var, width=50)
-        output_entry.pack(side="left", padx=(8, 6), fill="x", expand=True)
-        ttk.Button(row2, text="Browse", style="Small.TButton",
-                   command=self._browse_output).pack(side="left")
+        tk.Label(row2, text="Output format", bg=C["elevated"], fg=C["text_sec"],
+                 font=("Segoe UI", 10)).pack(side="left")
+        self._dropdown(row2, self.output_mode_var,
+                       ["Transcript (.txt)", "Rename source by transcript"],
+                       width=28).pack(side="left", padx=(8, 0))
+
+        row3 = tk.Frame(inner, bg=C["elevated"])
+        row3.pack(fill="x")
+
+        tk.Label(row3, text="Output path", bg=C["elevated"], fg=C["text_sec"],
+                 font=("Segoe UI", 10)).pack(side="left")
+        output_entry = tk.Entry(row3, textvariable=self.output_var, font=("Segoe UI", 10),
+                                bg=C["entry_bg"], fg=C["entry_fg"], insertbackground=C["accent"],
+                                relief="flat", highlightbackground=C["border"], highlightthickness=1)
+        output_entry.pack(side="left", padx=(8, 6), fill="x", expand=True, ipady=4)
+        browse_btn = tk.Button(row3, text="Browse", font=("Segoe UI", 9),
+                               bg=C["surface"], fg=C["text_sec"],
+                               activebackground=C["border"], activeforeground=C["text"],
+                               borderwidth=0, relief="flat", cursor="hand2",
+                               padx=12, pady=5, command=self._browse_output)
+        browse_btn.pack(side="left")
 
     def _build_action_bar(self, parent):
-        action_frame = ttk.Frame(parent, style="Main.TFrame")
-        action_frame.pack(fill="x", pady=(0, 10))
+        action = tk.Frame(parent, bg=C["bg"])
+        action.pack(fill="x", pady=(0, 10))
 
         self.transcribe_btn = tk.Button(
-            action_frame, text="TRANSCRIBE", font=("Segoe UI Semibold", 10),
+            action, text="TRANSCRIBE", font=("Segoe UI Semibold", 11),
             bg=C["accent"], fg="#13131a", activebackground=C["accent_hover"],
             activeforeground="#13131a", borderwidth=0, cursor="hand2",
-            padx=28, pady=9, relief="flat"
+            padx=30, pady=10, relief="flat"
         )
         self.transcribe_btn.configure(command=self._toggle_transcription)
         self.transcribe_btn.pack(side="left")
 
-        self.transcribe_btn.bind("<Enter>", lambda e: self.transcribe_btn.configure(bg=C["accent_hover"]))
-        self.transcribe_btn.bind("<Leave>", lambda e: self.transcribe_btn.configure(
-            bg=C["accent"] if self.transcribe_btn.cget("text") != "CANCELLING..." else C["text_dim"]
-        ))
+        def _btn_enter(e):
+            text = self.transcribe_btn.cget("text")
+            if text == "TRANSCRIBE":
+                self.transcribe_btn.configure(bg=C["accent_hover"])
+            elif text == "CANCEL":
+                self.transcribe_btn.configure(bg=C["red_hover"])
 
-        self.open_btn = ttk.Button(action_frame, text="Open output folder", style="Open.TButton",
-                                    command=self._open_output)
-        self.open_btn.pack(side="right")
+        def _btn_leave(e):
+            text = self.transcribe_btn.cget("text")
+            if text == "TRANSCRIBE":
+                self.transcribe_btn.configure(bg=C["accent"])
+            elif text == "CANCEL":
+                self.transcribe_btn.configure(bg=C["red"])
 
-    def _build_progress_area(self, parent):
-        progress_frame = ttk.Frame(parent, style="Card.TFrame")
-        progress_frame.pack(fill="both", expand=True)
+        self.transcribe_btn.bind("<Enter>", _btn_enter)
+        self.transcribe_btn.bind("<Leave>", _btn_leave)
 
-        inner = ttk.Frame(progress_frame, style="Card.TFrame")
+        open_btn = tk.Button(action, text="Open output folder", font=("Segoe UI", 9),
+                             bg=C["surface"], fg=C["text_sec"],
+                             activebackground=C["border"], activeforeground=C["text"],
+                             borderwidth=0, relief="flat", cursor="hand2",
+                             padx=14, pady=8, command=self._open_output)
+        open_btn.pack(side="right")
+
+    def _build_progress(self, parent):
+        prog_frame = tk.Frame(parent, bg=C["elevated"])
+        prog_frame.pack(fill="both", expand=True)
+
+        inner = tk.Frame(prog_frame, bg=C["elevated"])
         inner.pack(fill="both", expand=True, padx=12, pady=10)
 
-        self.progress_label = ttk.Label(inner, text="Ready", style="Card.TLabel")
-        self.progress_label.pack(anchor="w")
+        self.progress_label = tk.Label(inner, text="Ready", bg=C["elevated"],
+                                        fg=C["text_sec"], font=("Segoe UI", 9), anchor="w")
+        self.progress_label.pack(fill="x")
 
-        self.progress_bar = ttk.Progressbar(inner, style="Custom.Horizontal.TProgressbar",
-                                             mode="determinate", length=400)
-        self.progress_bar.pack(fill="x", pady=(6, 8))
+        self.progress_canvas = tk.Canvas(inner, bg=C["surface"], highlightthickness=0, height=6)
+        self.progress_canvas.pack(fill="x", pady=(6, 8))
+        self.progress_canvas.bind("<Configure>", lambda e: self._draw_progress())
 
         log_frame = tk.Frame(inner, bg=C["log_bg"], highlightbackground=C["border"],
                              highlightthickness=1)
@@ -256,10 +276,25 @@ class TranscriberApp:
                                 state="disabled", borderwidth=4, relief="flat",
                                 highlightthickness=0, insertbackground=C["accent"],
                                 selectbackground=C["accent"], selectforeground=C["text"])
-        log_scroll = ttk.Scrollbar(log_frame, orient="vertical", command=self.log_text.yview)
+        log_scroll = tk.Scrollbar(log_frame, orient="vertical", command=self.log_text.yview,
+                                  bg=C["surface"], troughcolor=C["log_bg"],
+                                  activebackground=C["border"], width=14,
+                                  highlightthickness=0, bd=0)
         self.log_text.configure(yscrollcommand=log_scroll.set)
         self.log_text.pack(side="left", fill="both", expand=True)
         log_scroll.pack(side="right", fill="y")
+
+    def _draw_progress(self):
+        c = self.progress_canvas
+        c.delete("all")
+        w = c.winfo_width()
+        h = c.winfo_height()
+        if w < 4:
+            return
+        c.create_rectangle(0, 0, w, h, fill=C["surface"], outline="")
+        if self._progress_value > 0:
+            fill_w = max(2, int(w * self._progress_value / 100))
+            c.create_rectangle(0, 0, fill_w, h, fill=C["accent"], outline="")
 
     def _on_drop(self, event):
         raw = event.data
@@ -268,9 +303,11 @@ class TranscriberApp:
             p = match.group(1) or match.group(2)
             if p:
                 paths.append(p)
+        self._slog(f"Files dropped: {len(paths)} item(s)")
         self._add_files(paths)
 
     def _browse_files(self):
+        self._slog("Opened file browser")
         exts = " ".join(f"*{e}" for e in sorted(SUPPORTED_EXTENSIONS))
         paths = filedialog.askopenfilenames(
             title="Select audio/video files",
@@ -278,11 +315,16 @@ class TranscriberApp:
         )
         if paths:
             self._add_files(paths)
+        else:
+            self._slog("File browser cancelled")
 
     def _browse_output(self):
+        self._slog("Opened output folder browser")
         d = filedialog.askdirectory(title="Select output folder")
         if d:
             self.output_var.set(d)
+        else:
+            self._slog("Output folder browser cancelled")
 
     def _add_files(self, paths):
         added = 0
@@ -291,19 +333,26 @@ class TranscriberApp:
             ext = os.path.splitext(p)[1].lower()
             if ext in SUPPORTED_EXTENSIONS and p not in self.files:
                 self.files.append(p)
+                self._slog(f"File added: {os.path.basename(p)}")
                 added += 1
         if added:
+            self._slog(f"Total files in queue: {len(self.files)}")
             self._refresh_file_list()
         elif paths:
+            self._slog(f"Rejected {len(paths)} unsupported file(s)")
             self._log("No supported files found in the dropped items.")
 
     def _remove_file(self, path):
         if path in self.files:
+            self._slog(f"File removed: {os.path.basename(path)}")
             self.files.remove(path)
+            self._slog(f"Total files in queue: {len(self.files)}")
             self._refresh_file_list()
 
     def _clear_files(self):
+        count = len(self.files)
         self.files.clear()
+        self._slog(f"Cleared all files ({count} removed)")
         self._refresh_file_list()
 
     def _refresh_file_list(self):
@@ -323,21 +372,23 @@ class TranscriberApp:
             color = C["amber"] if is_video else C["green"]
 
             tag_frame = tk.Frame(row, bg=color, padx=1, pady=0)
-            tag_frame.pack(side="left", padx=(6, 6), pady=2)
+            tag_frame.pack(side="left", padx=(8, 8), pady=3)
             tk.Label(tag_frame, text=tag, bg=color, fg=C["bg"],
-                     font=("Consolas", 7, "bold")).pack(padx=3)
+                     font=("Consolas", 8, "bold")).pack(padx=4)
 
             tk.Label(row, text=name, bg=C["elevated"], fg=C["text"],
-                     font=("Segoe UI", 9), anchor="w").pack(side="left", fill="x", expand=True)
+                     font=("Segoe UI", 10), anchor="w").pack(side="left", fill="x", expand=True)
 
             remove_btn = tk.Button(row, text="\u00d7", bg=C["elevated"], fg=C["text_dim"],
-                                   font=("Segoe UI", 10), borderwidth=0, cursor="hand2",
+                                   font=("Segoe UI", 14), borderwidth=0, cursor="hand2",
                                    activebackground=C["elevated"], activeforeground=C["red"],
+                                   padx=6, pady=2,
                                    command=lambda p=path: self._remove_file(p))
-            remove_btn.pack(side="right", padx=(0, 8))
+            remove_btn.pack(side="right", padx=(0, 10))
 
     def _toggle_transcription(self):
         if self.is_transcribing:
+            self._slog("Cancellation requested by user")
             self.cancel_requested = True
             self.transcribe_btn.configure(text="CANCELLING...", bg=C["text_dim"],
                                            activebackground=C["text_dim"], state="disabled")
@@ -347,6 +398,7 @@ class TranscriberApp:
             self._log("No files to transcribe. Add some files first.")
             return
 
+        self._slog(f"Transcription started: {len(self.files)} file(s), model={self.model_var.get()}, lang={self.language_var.get()}")
         self.is_transcribing = True
         self.cancel_requested = False
         self.transcribe_btn.configure(text="CANCEL", bg=C["red"], activebackground=C["red_hover"])
@@ -425,8 +477,9 @@ class TranscriberApp:
                             os.remove(temp_audio)
                         continue
 
+                    copy_renamed = self.output_mode_var.get() != "Transcript (.txt)"
                     saved_name = save_output(
-                        filepath, full_text, output_dir, self.copy_renamed_var.get()
+                        filepath, full_text, output_dir, copy_renamed
                     )
 
                     elapsed = time.time() - start_time
@@ -457,22 +510,69 @@ class TranscriberApp:
 
     def _open_output(self):
         output_dir = self.output_var.get()
+        self._slog(f"Opened output folder: {output_dir}")
         os.makedirs(output_dir, exist_ok=True)
         os.startfile(output_dir)
 
     def _update_status(self, text):
+        self._slog(f"[STATUS] {text}")
         self.root.after(0, lambda: self.progress_label.configure(text=text))
 
     def _set_progress(self, value):
-        self.root.after(0, lambda: self.progress_bar.configure(value=value))
+        self._progress_value = value
+        self.root.after(0, self._draw_progress)
 
     def _log(self, text):
+        self._slog(text)
         def _append():
             self.log_text.configure(state="normal")
             self.log_text.insert("end", text + "\n")
             self.log_text.see("end")
             self.log_text.configure(state="disabled")
         self.root.after(0, _append)
+
+    def _slog(self, text):
+        self._session_log.append(f"[{datetime.now().strftime('%H:%M:%S')}] {text}")
+
+    def _init_log(self):
+        os.makedirs(LOG_DIR, exist_ok=True)
+        for old in glob.glob(os.path.join(LOG_DIR, "*.txt")):
+            os.remove(old)
+        stamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        self._log_path = os.path.join(LOG_DIR, f"{stamp}.txt")
+        header = (
+            f"Session started: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+            f"Model: {self.model_var.get()}  |  Language: {self.language_var.get()}  |  "
+            f"Output mode: {self.output_mode_var.get()}\n"
+            f"Output path: {self.output_var.get()}\n"
+            + "=" * 60 + "\n"
+        )
+        with open(self._log_path, "w", encoding="utf-8") as f:
+            f.write(header)
+        self._slog("Application started")
+        self._flush_log()
+
+    def _flush_log(self):
+        if self._log_path and self._log_flush_idx < len(self._session_log):
+            try:
+                with open(self._log_path, "a", encoding="utf-8") as f:
+                    for line in self._session_log[self._log_flush_idx:]:
+                        f.write(line + "\n")
+                self._log_flush_idx = len(self._session_log)
+            except Exception:
+                pass
+        self.root.after(2000, self._flush_log)
+
+    def _on_close(self):
+        self._slog("Application closed")
+        if self._log_path:
+            try:
+                with open(self._log_path, "a", encoding="utf-8") as f:
+                    for line in self._session_log[self._log_flush_idx:]:
+                        f.write(line + "\n")
+            except Exception:
+                pass
+        self.root.destroy()
 
     def run(self):
         self.root.mainloop()
