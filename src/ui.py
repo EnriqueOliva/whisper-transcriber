@@ -17,18 +17,18 @@ class TranscriberApp:
     def __init__(self):
         self.root = tkdnd.Tk()
         self.root.title("Whisper Transcriber")
-        self.root.geometry("740x720")
-        self.root.minsize(640, 620)
+        _dpi_scale = self.root.winfo_fpixels('1i') / 96.0
+        self.root.geometry(f"{int(820 * _dpi_scale)}x{int(780 * _dpi_scale)}")
+        self.root.minsize(int(700 * _dpi_scale), int(660 * _dpi_scale))
         self.root.configure(bg=C["bg"])
 
         self.files = []
         self.model = None
         self.is_transcribing = False
         self.cancel_requested = False
-        self.copy_renamed_var = tk.BooleanVar(value=False)
+        self.output_mode_var = tk.StringVar(value="Transcript (.txt)")
 
         self._setup_styles()
-        self._build_menu_bar()
         self._build_ui()
 
         os.makedirs(DEFAULT_OUTPUT_DIR, exist_ok=True)
@@ -79,30 +79,6 @@ class TranscriberApp:
         style.configure("TScrollbar", background=C["surface"], troughcolor=C["elevated"],
                          arrowcolor=C["text_dim"], bordercolor=C["elevated"])
         style.map("TScrollbar", background=[("active", C["border"])])
-
-    def _build_menu_bar(self):
-        menubar = tk.Menu(self.root, bg=C["elevated"], fg=C["text_sec"],
-                          activebackground=C["accent"], activeforeground=C["text"],
-                          font=("Segoe UI", 9), borderwidth=0, relief="flat")
-
-        settings_menu = tk.Menu(menubar, tearoff=0, bg=C["elevated"], fg=C["text_sec"],
-                                activebackground=C["accent"], activeforeground=C["text"],
-                                font=("Segoe UI", 9), borderwidth=1, relief="solid")
-
-        features_menu = tk.Menu(settings_menu, tearoff=0, bg=C["elevated"], fg=C["text_sec"],
-                                activebackground=C["accent"], activeforeground=C["text"],
-                                font=("Segoe UI", 9), borderwidth=1, relief="solid")
-
-        features_menu.add_checkbutton(
-            label="Copy source file renamed by transcript content",
-            variable=self.copy_renamed_var,
-            onvalue=True, offvalue=False
-        )
-
-        settings_menu.add_cascade(label="Special features", menu=features_menu)
-        menubar.add_cascade(label="Settings", menu=settings_menu)
-
-        self.root.config(menu=menubar)
 
     def _build_ui(self):
         main_frame = ttk.Frame(self.root, style="Main.TFrame")
@@ -166,17 +142,21 @@ class TranscriberApp:
 
         self.file_inner.bind("<Configure>",
                              lambda e: self.file_canvas.configure(scrollregion=self.file_canvas.bbox("all")))
-        self.file_canvas.create_window((0, 0), window=self.file_inner, anchor="nw")
+        self._file_window_id = self.file_canvas.create_window((0, 0), window=self.file_inner, anchor="nw")
         self.file_canvas.configure(yscrollcommand=scrollbar.set)
 
         self.file_canvas.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
 
+        self.file_canvas.bind("<Configure>", self._on_file_canvas_configure)
         self.file_canvas.bind("<Enter>", lambda e: self.file_canvas.bind_all("<MouseWheel>", self._on_mousewheel))
         self.file_canvas.bind("<Leave>", lambda e: self.file_canvas.unbind_all("<MouseWheel>"))
 
     def _on_mousewheel(self, event):
         self.file_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+
+    def _on_file_canvas_configure(self, event):
+        self.file_canvas.itemconfigure(self._file_window_id, width=event.width)
 
     def _build_settings(self, parent):
         settings_frame = ttk.Frame(parent, style="Card.TFrame")
@@ -202,13 +182,21 @@ class TranscriberApp:
         model_combo.pack(side="left", padx=(8, 0))
 
         row2 = ttk.Frame(inner, style="Card.TFrame")
-        row2.pack(fill="x")
+        row2.pack(fill="x", pady=(0, 6))
 
-        ttk.Label(row2, text="Output", style="Card.TLabel").pack(side="left")
+        ttk.Label(row2, text="Output format", style="Card.TLabel").pack(side="left")
+        mode_combo = ttk.Combobox(row2, textvariable=self.output_mode_var, width=28, state="readonly",
+                                   values=["Transcript (.txt)", "Rename source by transcript"])
+        mode_combo.pack(side="left", padx=(8, 0))
+
+        row3 = ttk.Frame(inner, style="Card.TFrame")
+        row3.pack(fill="x")
+
+        ttk.Label(row3, text="Output path", style="Card.TLabel").pack(side="left")
         self.output_var = tk.StringVar(value=DEFAULT_OUTPUT_DIR)
-        output_entry = ttk.Entry(row2, textvariable=self.output_var, width=50)
+        output_entry = ttk.Entry(row3, textvariable=self.output_var, width=50)
         output_entry.pack(side="left", padx=(8, 6), fill="x", expand=True)
-        ttk.Button(row2, text="Browse", style="Small.TButton",
+        ttk.Button(row3, text="Browse", style="Small.TButton",
                    command=self._browse_output).pack(side="left")
 
     def _build_action_bar(self, parent):
@@ -224,10 +212,22 @@ class TranscriberApp:
         self.transcribe_btn.configure(command=self._toggle_transcription)
         self.transcribe_btn.pack(side="left")
 
-        self.transcribe_btn.bind("<Enter>", lambda e: self.transcribe_btn.configure(bg=C["accent_hover"]))
-        self.transcribe_btn.bind("<Leave>", lambda e: self.transcribe_btn.configure(
-            bg=C["accent"] if self.transcribe_btn.cget("text") != "CANCELLING..." else C["text_dim"]
-        ))
+        def _btn_enter(e):
+            text = self.transcribe_btn.cget("text")
+            if text == "TRANSCRIBE":
+                self.transcribe_btn.configure(bg=C["accent_hover"])
+            elif text == "CANCEL":
+                self.transcribe_btn.configure(bg=C["red_hover"])
+
+        def _btn_leave(e):
+            text = self.transcribe_btn.cget("text")
+            if text == "TRANSCRIBE":
+                self.transcribe_btn.configure(bg=C["accent"])
+            elif text == "CANCEL":
+                self.transcribe_btn.configure(bg=C["red"])
+
+        self.transcribe_btn.bind("<Enter>", _btn_enter)
+        self.transcribe_btn.bind("<Leave>", _btn_leave)
 
         self.open_btn = ttk.Button(action_frame, text="Open output folder", style="Open.TButton",
                                     command=self._open_output)
@@ -425,8 +425,9 @@ class TranscriberApp:
                             os.remove(temp_audio)
                         continue
 
+                    copy_renamed = self.output_mode_var.get() != "Transcript (.txt)"
                     saved_name = save_output(
-                        filepath, full_text, output_dir, self.copy_renamed_var.get()
+                        filepath, full_text, output_dir, copy_renamed
                     )
 
                     elapsed = time.time() - start_time
