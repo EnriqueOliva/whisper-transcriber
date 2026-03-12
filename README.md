@@ -13,9 +13,10 @@ Built on [faster-whisper](https://github.com/SYSTRAN/faster-whisper) (a high-per
 - **Audio support** — mp3, wav, m4a, ogg, flac, wma, aac
 - **99+ languages** — Spanish, English, Portuguese, French, German, and more
 - **Multiple models** — from `tiny` (fastest) to `large-v3` (most accurate)
-- **Special feature: rename mode** — copies source files renamed by their transcript content (useful for cataloging voice clips)
+- **Output format options** — save as `.txt` transcript, or copy source files renamed by their transcript content (useful for cataloging voice clips)
 - **Timeout protection** — gracefully skips files that hang due to noise or corruption
 - **VAD fallback** — retries with Voice Activity Detection disabled if the first pass returns empty
+- **Session logging** — automatically saves a detailed session log to `log/` on every run
 
 ## Requirements
 
@@ -52,6 +53,8 @@ whisper-transcriber/
 │   ├── engine.py           # Transcription logic (faster-whisper, ffmpeg, file I/O)
 │   └── constants.py        # Config (colors, extensions, paths)
 ├── output/                 # Default transcript output directory
+├── log/                    # Session logs (auto-generated, one file per last session)
+├── LICENSE                 # MIT License
 └── .venv/                  # Python virtual environment (created by setup)
 ```
 
@@ -63,11 +66,8 @@ All settings are available in the app UI:
 |---------|---------|---------|
 | Language | Auto-detect, Spanish, English, +7 more | Spanish |
 | Model | large-v3, medium, small, base, tiny | large-v3 |
+| Output format | Transcript (.txt), Rename source by transcript | Transcript (.txt) |
 | Output folder | Any local path | `./output/` |
-
-### Special Features (Settings menu)
-
-- **Copy source file renamed by transcript content** — Instead of creating a `.txt`, copies the original audio/video file to the output folder with the transcript as its filename. Useful for cataloging short voice clips.
 
 ## Dependencies
 
@@ -112,4 +112,6 @@ Then run `setup/setup.vbs`. The setup script handles everything else.
 
 ## License
 
-This project uses [faster-whisper](https://github.com/SYSTRAN/faster-whisper) (MIT) which is based on [OpenAI Whisper](https://github.com/openai/whisper) (MIT).
+MIT License. See [LICENSE](LICENSE).
+
+Built on [faster-whisper](https://github.com/SYSTRAN/faster-whisper) (MIT), based on [OpenAI Whisper](https://github.com/openai/whisper) (MIT).
