@@ -87,28 +87,13 @@ Managed automatically by the setup script:
 
 Models are downloaded automatically on first use and cached at `~/.cache/huggingface/`.
 
-| Model | Size | Speed | Accuracy | VRAM |
-|-------|------|-------|----------|------|
-| tiny | ~75 MB | Fastest | Basic | ~1 GB |
-| base | ~145 MB | Very fast | Good | ~1 GB |
-| small | ~480 MB | Fast | Very good | ~2 GB |
-| medium | ~1.5 GB | Moderate | Great | ~5 GB |
-| large-v3 | ~1.5 GB | Moderate | Best | ~4 GB |
+Available models, from lightest to heaviest: `tiny`, `base`, `small`, `medium`, `large-v3`. Smaller models are faster and use less VRAM; larger models produce more accurate transcriptions.
 
-> **Recommendation:** `large-v3` with an RTX GPU. On an RTX 4070 12GB, it processes audio at roughly 10-20x real-time speed.
+## Setup on Another PC
 
-## Portability
-
-To set up on a new Windows PC, copy these files:
-- `launch.vbs`
-- `setup/setup.vbs`
-- `setup/setup.ps1`
-- `src/main.py`
-- `src/ui.py`
-- `src/engine.py`
-- `src/constants.py`
-
-Then run `setup/setup.vbs`. The setup script handles everything else.
+1. Clone the repo (or download as ZIP and extract)
+2. Run `setup/setup.vbs` — it installs everything automatically
+3. Double-click `launch.vbs` to start the app
 
 ## License
 
