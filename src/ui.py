@@ -145,6 +145,7 @@ class TranscriberApp:
         self.root.configure(bg=P["bg"])
 
         self.files = []
+        self._folder_root = None
         self.model = None
         self._loaded_model_name = None
         self.is_transcribing = False
@@ -291,13 +292,14 @@ class TranscriberApp:
         h = self.drop_canvas.winfo_height()
         if w < 10:
             return
+        tree_mode = self.output_mode_var.get() == "Rename folder tree"
         text_color = P["accent"] if self._drop_hover else P["text_dim"]
-        self.drop_canvas.itemconfigure("drop_main", fill=text_color,
-                                        text="Drop audio or video files here")
+        main_text = "Drop a folder here to scan recursively" if tree_mode else "Drop audio or video files here"
+        self.drop_canvas.itemconfigure("drop_main", fill=text_color, text=main_text)
         self.drop_canvas.coords("drop_main", w // 2, h // 2 - 10)
         sub_color = P["text_sec"] if self._drop_hover else _lerp(P["text_dim"], P["bg"], 0.3)
-        self.drop_canvas.itemconfigure("drop_sub", fill=sub_color,
-                                        text="or click to browse")
+        sub_text = "or click to browse for a folder" if tree_mode else "or click to browse"
+        self.drop_canvas.itemconfigure("drop_sub", fill=sub_color, text=sub_text)
         self.drop_canvas.coords("drop_sub", w // 2, h // 2 + 14)
         self._create_particle_items()
 
@@ -377,7 +379,8 @@ class TranscriberApp:
         tk.Label(row2, text="Output format", bg=P["elevated"], fg=P["text_sec"],
                  font=("Bahnschrift", 10)).pack(side="left")
         self._dropdown(row2, self.output_mode_var,
-                       ["Transcript (.txt)", "Rename source by transcript"],
+                       ["Transcript (.txt)", "Rename source by transcript",
+                        "Rename folder tree"],
                        width=28).pack(side="left", padx=(8, 0))
 
         row3 = tk.Frame(inner, bg=P["elevated"])
@@ -561,11 +564,26 @@ class TranscriberApp:
         for match in re.finditer(r'\{([^}]+)\}|(\S+)', raw):
             p = match.group(1) or match.group(2)
             if p:
-                paths.append(p)
+                paths.append(p.strip('"').strip("'"))
         self._slog(f"Files dropped: {len(paths)} item(s)")
-        self._add_files(paths)
+        folders = [p for p in paths if os.path.isdir(p)]
+        files = [p for p in paths if os.path.isfile(p)]
+        if folders:
+            self._scan_folders(folders)
+        elif files:
+            self._add_files(files)
+        else:
+            self._log("No supported files or folders found.")
 
     def _browse_files(self):
+        if self.output_mode_var.get() == "Rename folder tree":
+            self._slog("Opened folder browser (tree mode)")
+            d = filedialog.askdirectory(title="Select folder to scan recursively")
+            if d:
+                self._scan_folders([d])
+            else:
+                self._slog("Folder browser cancelled")
+            return
         self._slog("Opened file browser")
         exts = " ".join(f"*{e}" for e in sorted(SUPPORTED_EXTENSIONS))
         paths = filedialog.askopenfilenames(
@@ -601,6 +619,26 @@ class TranscriberApp:
             self._slog(f"Rejected {len(paths)} unsupported file(s)")
             self._log("No supported files found in the dropped items.")
 
+    def _scan_folders(self, folders):
+        self.files.clear()
+        if len(folders) == 1:
+            self._folder_root = folders[0]
+        else:
+            self._folder_root = os.path.commonpath(folders)
+        for folder in folders:
+            for dirpath, _, filenames in os.walk(folder):
+                for fn in sorted(filenames):
+                    ext = os.path.splitext(fn)[1].lower()
+                    if ext in SUPPORTED_EXTENSIONS:
+                        self.files.append(os.path.join(dirpath, fn))
+        self._slog(f"Scanned root: {self._folder_root}")
+        self._slog(f"Found {len(self.files)} audio file(s)")
+        if self.files:
+            self._log(f"Scanned: {os.path.basename(self._folder_root)} ({len(self.files)} files)")
+            self._refresh_file_list()
+        else:
+            self._log("No supported audio files found in folder.")
+
     def _remove_file(self, path):
         if path in self.files:
             self._slog(f"File removed: {os.path.basename(path)}")
@@ -611,6 +649,7 @@ class TranscriberApp:
     def _clear_files(self):
         count = len(self.files)
         self.files.clear()
+        self._folder_root = None
         self._slog(f"Cleared all files ({count} removed)")
         self._refresh_file_list()
 
@@ -625,7 +664,10 @@ class TranscriberApp:
             row = tk.Frame(self.file_inner, bg=bg)
             row.pack(fill="x", pady=0)
 
-            name = os.path.basename(path)
+            if self._folder_root:
+                name = os.path.relpath(path, self._folder_root)
+            else:
+                name = os.path.basename(path)
             ext = os.path.splitext(path)[1].lower()
             is_video = ext in VIDEO_EXTENSIONS
             tag = "VID" if is_video else "AUD"
@@ -736,9 +778,17 @@ class TranscriberApp:
                             os.remove(temp_audio)
                         continue
 
-                    copy_renamed = self.output_mode_var.get() != "Transcript (.txt)"
+                    mode = self.output_mode_var.get()
+                    copy_renamed = mode != "Transcript (.txt)"
+                    sub_dir = None
+                    if mode == "Rename folder tree" and self._folder_root:
+                        rel = os.path.relpath(filepath, self._folder_root)
+                        sub_dir = os.path.dirname(rel)
+                        if sub_dir == ".":
+                            sub_dir = None
                     saved_name = save_output(
-                        filepath, full_text, output_dir, copy_renamed
+                        filepath, full_text, output_dir, copy_renamed,
+                        sub_dir=sub_dir
                     )
 
                     elapsed = time.time() - start_time

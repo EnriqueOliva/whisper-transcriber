@@ -84,17 +84,21 @@ def transcribe_audio(model, audio_path, lang_code, on_progress=None, is_cancelle
     return text_parts, info, "ok"
 
 
-def save_output(filepath, full_text, output_dir, copy_renamed):
+def save_output(filepath, full_text, output_dir, copy_renamed, sub_dir=None):
+    target_dir = output_dir
+    if sub_dir:
+        target_dir = os.path.join(output_dir, sub_dir)
+        os.makedirs(target_dir, exist_ok=True)
     name = os.path.basename(filepath)
     if copy_renamed and full_text.strip():
         source_ext = os.path.splitext(filepath)[1]
         renamed_base = sanitize_filename(full_text.replace("\n", " "))
-        renamed_path = unique_path(output_dir, renamed_base, source_ext)
+        renamed_path = unique_path(target_dir, renamed_base, source_ext)
         shutil.copy2(filepath, renamed_path)
         return os.path.basename(renamed_path)
     else:
         source_base = os.path.splitext(name)[0]
-        out_path = os.path.join(output_dir, source_base + ".txt")
+        out_path = os.path.join(target_dir, source_base + ".txt")
         with open(out_path, "w", encoding="utf-8") as f:
             f.write(full_text)
         return os.path.basename(out_path)
