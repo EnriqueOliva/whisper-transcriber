@@ -1,29 +1,8 @@
 import os
 import subprocess
 import time
-import shutil
 
-from constants import VIDEO_EXTENSIONS, INVALID_FILENAME_CHARS, MAX_FILENAME_LEN
-
-
-def sanitize_filename(text):
-    name = INVALID_FILENAME_CHARS.sub("", text)
-    name = name.strip(". ")
-    if len(name) > MAX_FILENAME_LEN:
-        name = name[:MAX_FILENAME_LEN].rsplit(" ", 1)[0].strip(". ")
-    return name or "untitled"
-
-
-def unique_path(directory, base_name, ext):
-    candidate = os.path.join(directory, base_name + ext)
-    if not os.path.exists(candidate):
-        return candidate
-    counter = 2
-    while True:
-        candidate = os.path.join(directory, f"{base_name} ({counter}){ext}")
-        if not os.path.exists(candidate):
-            return candidate
-        counter += 1
+from constants import VIDEO_EXTENSIONS
 
 
 def extract_audio(filepath, output_dir):
@@ -84,17 +63,9 @@ def transcribe_audio(model, audio_path, lang_code, on_progress=None, is_cancelle
     return text_parts, info, "ok"
 
 
-def save_output(filepath, full_text, output_dir, copy_renamed):
-    name = os.path.basename(filepath)
-    if copy_renamed and full_text.strip():
-        source_ext = os.path.splitext(filepath)[1]
-        renamed_base = sanitize_filename(full_text.replace("\n", " "))
-        renamed_path = unique_path(output_dir, renamed_base, source_ext)
-        shutil.copy2(filepath, renamed_path)
-        return os.path.basename(renamed_path)
-    else:
-        source_base = os.path.splitext(name)[0]
-        out_path = os.path.join(output_dir, source_base + ".txt")
-        with open(out_path, "w", encoding="utf-8") as f:
-            f.write(full_text)
-        return os.path.basename(out_path)
+def save_transcript(filepath, full_text, output_dir):
+    source_base = os.path.splitext(os.path.basename(filepath))[0]
+    out_path = os.path.join(output_dir, source_base + ".txt")
+    with open(out_path, "w", encoding="utf-8") as f:
+        f.write(full_text)
+    return os.path.basename(out_path)

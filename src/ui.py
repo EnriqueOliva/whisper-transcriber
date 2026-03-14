@@ -15,7 +15,7 @@ from constants import (
     SUPPORTED_EXTENSIONS, VIDEO_EXTENSIONS, DEFAULT_OUTPUT_DIR, LANG_MAP,
     LOG_DIR,
 )
-from engine import extract_audio, transcribe_audio, save_output
+from engine import extract_audio, transcribe_audio, save_transcript
 
 
 P = {
@@ -28,9 +28,7 @@ P = {
     "text_dim":     "#5a5570",
     "accent":       "#a78bfa",
     "accent_hover": "#c4b5fd",
-    "accent_press": "#8b5cf6",
     "cyan":         "#67e8f9",
-    "green":        "#86efac",
     "amber":        "#fbbf24",
     "red":          "#f87171",
     "red_hover":    "#fca5a5",
@@ -160,7 +158,6 @@ class TranscriberApp:
 
         self.language_var = tk.StringVar(value="Spanish")
         self.model_var = tk.StringVar(value="large-v3")
-        self.output_mode_var = tk.StringVar(value="Transcript (.txt)")
         self.output_var = tk.StringVar(value=DEFAULT_OUTPUT_DIR)
 
         self._build_ui()
@@ -171,7 +168,6 @@ class TranscriberApp:
         self._init_log()
         self.language_var.trace_add("write", lambda *_: self._slog(f"Setting changed: language = {self.language_var.get()}"))
         self.model_var.trace_add("write", lambda *_: self._slog(f"Setting changed: model = {self.model_var.get()}"))
-        self.output_mode_var.trace_add("write", lambda *_: self._slog(f"Setting changed: output mode = {self.output_mode_var.get()}"))
         self.output_var.trace_add("write", lambda *_: self._slog(f"Setting changed: output path = {self.output_var.get()}"))
 
     def _hover_bind(self, widget, bg_from, bg_to):
@@ -372,25 +368,16 @@ class TranscriberApp:
                        width=14).pack(side="left", padx=(8, 0))
 
         row2 = tk.Frame(inner, bg=P["elevated"])
-        row2.pack(fill="x", pady=(0, 8))
+        row2.pack(fill="x")
 
-        tk.Label(row2, text="Output format", bg=P["elevated"], fg=P["text_sec"],
+        tk.Label(row2, text="Output path", bg=P["elevated"], fg=P["text_sec"],
                  font=("Bahnschrift", 10)).pack(side="left")
-        self._dropdown(row2, self.output_mode_var,
-                       ["Transcript (.txt)", "Rename source by transcript"],
-                       width=28).pack(side="left", padx=(8, 0))
-
-        row3 = tk.Frame(inner, bg=P["elevated"])
-        row3.pack(fill="x")
-
-        tk.Label(row3, text="Output path", bg=P["elevated"], fg=P["text_sec"],
-                 font=("Bahnschrift", 10)).pack(side="left")
-        output_entry = tk.Entry(row3, textvariable=self.output_var, font=("Bahnschrift", 10),
+        output_entry = tk.Entry(row2, textvariable=self.output_var, font=("Bahnschrift", 10),
                                 bg=P["entry_bg"], fg=P["entry_fg"], insertbackground=P["accent"],
                                 relief="flat", highlightbackground=P["border"], highlightthickness=1)
         output_entry.pack(side="left", padx=(8, 8), fill="x", expand=True, ipady=4)
 
-        browse_frame = tk.Frame(row3, bg=P["border"], padx=1, pady=1)
+        browse_frame = tk.Frame(row2, bg=P["border"], padx=1, pady=1)
         browse_frame.pack(side="left")
         browse_btn = tk.Button(browse_frame, text="Browse", font=("Bahnschrift", 9),
                                bg=P["surface"], fg=P["text_sec"],
@@ -736,10 +723,7 @@ class TranscriberApp:
                             os.remove(temp_audio)
                         continue
 
-                    copy_renamed = self.output_mode_var.get() != "Transcript (.txt)"
-                    saved_name = save_output(
-                        filepath, full_text, output_dir, copy_renamed
-                    )
+                    saved_name = save_transcript(filepath, full_text, output_dir)
 
                     elapsed = time.time() - start_time
                     detected = info.language if language == "Auto-detect" else language
@@ -805,8 +789,7 @@ class TranscriberApp:
         self._log_path = os.path.join(LOG_DIR, f"{stamp}.txt")
         header = (
             f"Session started: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
-            f"Model: {self.model_var.get()}  |  Language: {self.language_var.get()}  |  "
-            f"Output mode: {self.output_mode_var.get()}\n"
+            f"Model: {self.model_var.get()}  |  Language: {self.language_var.get()}\n"
             f"Output path: {self.output_var.get()}\n"
             + "=" * 60 + "\n"
         )
