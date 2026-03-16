@@ -1,13 +1,13 @@
 # Whisper Transcriber
 
-A GPU-accelerated audio/video transcription desktop app for Windows. Drag and drop files, get text transcripts. Runs 100% locally — no internet, no cloud, no subscriptions.
+A local audio/video transcription desktop app for Windows. Drag and drop files, get text transcripts. Runs 100% locally — no internet, no cloud, no subscriptions. Supports GPU acceleration via NVIDIA CUDA, and works on CPU-only machines too.
 
 Built on [faster-whisper](https://github.com/SYSTRAN/faster-whisper) (a high-performance reimplementation of OpenAI's Whisper using CTranslate2).
 
 ## Features
 
 - **Drag & drop** audio and video files — or click to browse
-- **GPU-accelerated** via NVIDIA CUDA (RTX series recommended)
+- **GPU-accelerated** via NVIDIA CUDA when available, with automatic CPU fallback
 - **Batch processing** — queue hundreds of files at once
 - **Video support** — auto-extracts audio from mp4, mkv, avi, mov, webm, etc.
 - **Audio support** — mp3, wav, m4a, ogg, flac, wma, aac
@@ -21,7 +21,7 @@ Built on [faster-whisper](https://github.com/SYSTRAN/faster-whisper) (a high-per
 ## Requirements
 
 - Windows 10/11
-- NVIDIA GPU with updated drivers (any modern GeForce/RTX)
+- NVIDIA GPU with updated drivers (optional — enables faster transcription)
 - ~4 GB disk space (dependencies + model cache)
 
 ## Dependencies
@@ -35,8 +35,8 @@ Managed automatically by the setup script:
 | Python 3.11                                                 | Runtime                          | uv                  |
 | [faster-whisper](https://github.com/SYSTRAN/faster-whisper) | Whisper inference engine         | pip (in venv)       |
 | [tkinterdnd2](https://github.com/pmgagne/tkinterdnd2)       | Drag & drop for tkinter          | pip (in venv)       |
-| nvidia-cublas-cu12                                          | CUDA linear algebra              | pip (in venv)       |
-| nvidia-cudnn-cu12                                           | CUDA deep neural networks        | pip (in venv)       |
+| nvidia-cublas-cu12                                          | CUDA linear algebra (GPU only)   | pip (in venv)       |
+| nvidia-cudnn-cu12                                           | CUDA deep neural networks (GPU only) | pip (in venv)       |
 
 ## Quick Start
 
@@ -80,14 +80,14 @@ All settings are available in the app UI:
 | ------------- | ---------------------------------------------- | ----------------- |
 | Language      | Auto-detect, Spanish, English, +7 more         | Spanish           |
 | Model         | large-v3, medium, small, base, tiny            | large-v3          |
-| Output format | Transcript (.txt), Rename source by transcript | Transcript (.txt) |
+| Device        | Auto, CPU, GPU (CUDA)                          | Auto              |
 | Output folder | Any local path                                 | `./output/`       |
 
 ## Model Information
 
 Models are downloaded automatically on first use and cached at `~/.cache/huggingface/`.
 
-Available models, from lightest to heaviest: `tiny`, `base`, `small`, `medium`, `large-v3`. Smaller models are faster and use less VRAM; larger models produce more accurate transcriptions.
+Available models, from lightest to heaviest: `tiny`, `base`, `small`, `medium`, `large-v3`. Smaller models are faster and use less VRAM; larger models produce more accurate transcriptions. On CPU-only machines, `small` or `medium` are recommended for a good balance of speed and accuracy.
 
 ## License
 

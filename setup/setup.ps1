@@ -115,9 +115,20 @@ try {
 
 # Step 5: Dependencies
 Write-Step "5/5" "Installing dependencies (this may take a few minutes)..."
-Write-Host "       faster-whisper, CUDA libraries, UI toolkit..." -ForegroundColor Gray
+$nvidiaGpu = Get-CimInstance Win32_VideoController -ErrorAction SilentlyContinue |
+    Where-Object { $_.Name -match "NVIDIA" } | Select-Object -First 1
+$pipPkgs = @("faster-whisper", "tkinterdnd2")
+if ($nvidiaGpu) {
+    Write-Host "       NVIDIA GPU detected: $($nvidiaGpu.Name)" -ForegroundColor Green
+    Write-Host "       faster-whisper, CUDA libraries, UI toolkit..." -ForegroundColor Gray
+    $pipPkgs += "nvidia-cublas-cu12"
+    $pipPkgs += "nvidia-cudnn-cu12"
+} else {
+    Write-Host "       No NVIDIA GPU detected - installing CPU-only mode" -ForegroundColor Yellow
+    Write-Host "       faster-whisper, UI toolkit..." -ForegroundColor Gray
+}
 try {
-    & uv pip install faster-whisper tkinterdnd2 nvidia-cublas-cu12 nvidia-cudnn-cu12 2>&1 | ForEach-Object {
+    & uv pip install @pipPkgs 2>&1 | ForEach-Object {
         $line = $_.ToString()
         if ($line -match "Downloading|Installed|Resolved") {
             Write-Host "       $line" -ForegroundColor Gray

@@ -145,6 +145,7 @@ class TranscriberApp:
         self.files = []
         self.model = None
         self._loaded_model_name = None
+        self._loaded_device = None
         self.is_transcribing = False
         self.cancel_requested = False
         self._progress_value = 0
@@ -158,6 +159,7 @@ class TranscriberApp:
 
         self.language_var = tk.StringVar(value="Spanish")
         self.model_var = tk.StringVar(value="large-v3")
+        self.device_var = tk.StringVar(value="Auto")
         self.output_var = tk.StringVar(value=DEFAULT_OUTPUT_DIR)
 
         self._build_ui()
@@ -168,6 +170,7 @@ class TranscriberApp:
         self._init_log()
         self.language_var.trace_add("write", lambda *_: self._slog(f"Setting changed: language = {self.language_var.get()}"))
         self.model_var.trace_add("write", lambda *_: self._slog(f"Setting changed: model = {self.model_var.get()}"))
+        self.device_var.trace_add("write", lambda *_: self._slog(f"Setting changed: device = {self.device_var.get()}"))
         self.output_var.trace_add("write", lambda *_: self._slog(f"Setting changed: output path = {self.output_var.get()}"))
 
     def _hover_bind(self, widget, bg_from, bg_to):
@@ -365,7 +368,13 @@ class TranscriberApp:
                  font=("Bahnschrift", 10)).pack(side="left")
         self._dropdown(row1, self.model_var,
                        ["large-v3", "medium", "small", "base", "tiny"],
-                       width=14).pack(side="left", padx=(8, 0))
+                       width=14).pack(side="left", padx=(8, 28))
+
+        tk.Label(row1, text="Device", bg=P["elevated"], fg=P["text_sec"],
+                 font=("Bahnschrift", 10)).pack(side="left")
+        self._dropdown(row1, self.device_var,
+                       ["Auto", "CPU", "GPU (CUDA)"],
+                       width=12).pack(side="left", padx=(8, 0))
 
         row2 = tk.Frame(inner, bg=P["elevated"])
         row2.pack(fill="x")
@@ -650,6 +659,20 @@ class TranscriberApp:
                                        activebackground=P["red_hover"])
         threading.Thread(target=self._transcribe_worker, daemon=True).start()
 
+    def _resolve_device(self):
+        choice = self.device_var.get()
+        if choice == "CPU":
+            return "cpu", "int8"
+        if choice == "GPU (CUDA)":
+            return "cuda", "float16"
+        try:
+            import ctranslate2
+            if ctranslate2.get_cuda_device_count() > 0:
+                return "cuda", "float16"
+        except Exception as e:
+            self._slog(f"CUDA detection failed ({e}), defaulting to CPU")
+        return "cpu", "int8"
+
     def _transcribe_worker(self):
         output_dir = self.output_var.get()
         os.makedirs(output_dir, exist_ok=True)
@@ -657,14 +680,28 @@ class TranscriberApp:
 
         try:
             model_name = self.model_var.get()
+            device, compute_type = self._resolve_device()
             self._update_status(f"Loading model '{model_name}'...")
             self._set_progress(0)
 
-            if self.model is None or self._loaded_model_name != model_name:
-                self.model = WhisperModel(model_name, device="cuda", compute_type="float16")
+            if self.model is None or self._loaded_model_name != model_name or self._loaded_device != device:
+                try:
+                    self.model = WhisperModel(model_name, device=device, compute_type=compute_type)
+                except Exception as e:
+                    if device == "cuda":
+                        self._log(f"CUDA load failed ({e}), falling back to CPU")
+                        device, compute_type = "cpu", "int8"
+                        self.model = WhisperModel(model_name, device=device, compute_type=compute_type)
+                    else:
+                        raise
                 self._loaded_model_name = model_name
+                self._loaded_device = device
 
-            self._log(f"Model '{model_name}' loaded on GPU")
+            device_label = "GPU (CUDA)" if device == "cuda" else "CPU"
+            self._log(f"Model '{model_name}' loaded on {device_label}")
+
+            if device == "cpu" and model_name in ("large-v3",):
+                self._log("Note: large-v3 on CPU may be slow. Consider small or medium.")
 
             language = self.language_var.get()
             lang_code = None if language == "Auto-detect" else LANG_MAP.get(language)
@@ -789,7 +826,7 @@ class TranscriberApp:
         self._log_path = os.path.join(LOG_DIR, f"{stamp}.txt")
         header = (
             f"Session started: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
-            f"Model: {self.model_var.get()}  |  Language: {self.language_var.get()}\n"
+            f"Model: {self.model_var.get()}  |  Language: {self.language_var.get()}  |  Device: {self.device_var.get()}\n"
             f"Output path: {self.output_var.get()}\n"
             + "=" * 60 + "\n"
         )
